@@ -11,25 +11,24 @@ source("plfill.R")
 # determines ranking of X values for fixed lambda and b
 # this function will error with max(X) > 170 because the factorial becomes too large
 r.g99 <- function(X, lambda, b) {
-	# verify that X is sorted, connected, and starts at 0
-	if(sum(X != sort(X))) { stop("G99 rho: unsorted X") }
-	if(max(X[2:length(X)] - X[1:(length(X)-1)]) > 1) { stop("G99 rho: X not connected")}
-	if(X[1] != 0) { stop("G99 rho: X[1] != 0") }
-	
-	# compute cumprod to get factorials
-	X.factorials = c(1, cumprod(X[2:length(X)]))
-	if(max(X.factorials)==Inf) { 
-		first.overflow = X[min(which(X.factorials==Inf))]
-		stop(paste("G99 rho: infinite factorial for X=",first.overflow,sep='')) 
-	}
-	
-	# compute reference mean as ratio of cumulative sums
-	temp = exp(X*log(b) - log(X.factorials))
-	est.new.numer = cumsum(X*temp)
-	est.new.denom = cumsum(temp)
-	
-	est.new = X + 1 - exp(log(est.new.numer) - log(est.new.denom))			
 
+  est.new = sapply(X, function(x,lambda,b) {
+    K = 0:x
+    K.factorials = factorial(K)
+	  if(max(K.factorials)==Inf) { 
+		  first.overflow = K[min(which(K.factorials==Inf))]
+		  stop(paste("G99 rho: infinite factorial for k=",first.overflow," with x=",x,sep='')) 
+	  }
+	
+	  # compute reference mean as ratio of cumulative sums
+	  temp = exp(K*log(b) - log(K.factorials))
+	  est.new.numer = sum(K*temp)
+	  est.new.denom = sum(temp)
+	
+	  est.new = x + 1 - exp(log(est.new.numer) - log(est.new.denom))
+	  return(est.new)
+  }, lambda, b)
+  
 	# the numerator becomes zero for large X and small lambda+b, so ranks are determined by logs instead
 	#return(dpois(X,lambda+b) / dpois(X,est.new+b))
 
@@ -41,20 +40,35 @@ r.g99 <- function(X, lambda, b) {
 
 # raw plausibility of lambda range for fixed x and b
 # determined only by ordering function, could have nonmonotone ("valleys" or "teeth")
-pl.g99.raw <- function(lambda, x, b) {
-	return(raw.pl.ordered(lambda, x, b, r.g99))
+pl.g99.raw <- function(lambda, x, b, NP=0) {
+	return(raw.pl.ordered(lambda, x, b, r.g99, NP))
 }
 
 # monotone plausibility of lambda range for fixed x and b after filling any valleys
-pl.g99 <- function(lambda, x, b) {
-	return(adj.pl.fill(raw.pl.ordered(lambda, x, b, r.g99)))
+pl.g99 <- function(lambda, x, b, NP=0) {
+  pl.raw = raw.pl.ordered(lambda, x, b, r.g99, NP)
+  
+  # set up parallel cluster if needed
+  cl = NULL
+  if(length(x) > 1 && NP > 0) {
+    if(require(doParallel)==0) { stop("doParallel package required for NP>0") }
+    cl <- makeCluster(min(length(x),NP))
+    registerDoParallel(cl)
+  }
+  
+  pl.adj = ddply(.data=pl.raw, .variables="x", .fun=adj.pl.fill, .parallel=!is.null(cl), .paropts=list(.export=ls(envir=globalenv())))
+  
+  # shut down parallel cluster if it was created
+  if(!is.null(cl)) {stopCluster(cl)}
+  
+	return(pl.adj)
 }
 
 # plots the raw and filled plausibility in the same figure
-plot.g99.rawadj <- function(x,b) {
+plot.g99.rawadj <- function(x,b,NP=0) {
 	lambda = seq(0,max(2*x,5),0.001)
-	pl.g99.lambda = pl.g99(lambda,x,b)$pl
-	pl.g99.lambda.raw = pl.g99.raw(lambda,x,b)$pl
+	pl.g99.lambda = pl.g99(lambda,x,b,NP)$pl
+	pl.g99.lambda.raw = pl.g99.raw(lambda,x,b,NP)$pl
 	plot(lambda, pl.g99.lambda, type="l", xlim=c(min(lambda),max(lambda)), ylim=c(0,1), ylab="plausibility", xlab="signal rate (lambda)", main=paste("x=",x," b=",b,sep=""))
 	lines(lambda, pl.g99.lambda.raw,lty=2)	
 }

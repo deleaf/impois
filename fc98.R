@@ -21,20 +21,35 @@ r.fc98 <- function(X, lambda, b) {
 
 # raw plausibility of lambda range for fixed x and b
 # determined only by ordering function, could have nonmonotone ("valleys" or "teeth")
-pl.fc98.raw <- function(lambda, x, b) {
-	return(raw.pl.ordered(lambda, x, b, r.fc98))
+pl.fc98.raw <- function(lambda, x, b, NP=0) {
+	return(raw.pl.ordered(lambda, x, b, r.fc98, NP))
 }
 
 # monotone plausibility of lambda range for fixed x and b after filling any valleys
-pl.fc98 <- function(lambda, x, b) {
-	return(adj.pl.fill(raw.pl.ordered(lambda, x, b, r.fc98)))
+pl.fc98 <- function(lambda, x, b, NP=0) {
+  pl.raw = raw.pl.ordered(lambda, x, b, r.fc98, NP)
+  
+  # set up parallel cluster if needed
+  cl = NULL
+  if(length(x) > 1 && NP > 0) {
+    if(require(doParallel)==0) { stop("doParallel package required for NP>0") }
+    cl <- makeCluster(min(length(x),NP))
+    registerDoParallel(cl)
+  }
+  
+  pl.adj = ddply(.data=pl.raw, .variables="x", .fun=adj.pl.fill, .parallel=!is.null(cl), .paropts=list(.export=ls(envir=globalenv())))
+  
+  # shut down parallel cluster if it was created
+  if(!is.null(cl)) {stopCluster(cl)}
+  
+	return(pl.adj)
 }
 
 # plots the raw and filled plausibility in the same figure
-plot.fc98.rawadj <- function(x,b) {
+plot.fc98.rawadj <- function(x,b,NP=0) {
 	lambda = seq(0,max(2*x,5),0.001)
-	pl.fc98.lambda = pl.fc98(lambda,x,b)$pl
-	pl.fc98.lambda.raw = pl.fc98.raw(lambda,x,b)$pl
+	pl.fc98.lambda = pl.fc98(lambda,x,b,NP)$pl
+	pl.fc98.lambda.raw = pl.fc98.raw(lambda,x,b,NP)$pl
 	plot(lambda, pl.fc98.lambda, type="l", xlim=c(min(lambda),max(lambda)), ylim=c(0,1), ylab="plausibility", xlab="signal rate (lambda)", main=paste("x=",x," b=",b,sep=""))
 	lines(lambda, pl.fc98.lambda.raw,lty=2)	
 }
